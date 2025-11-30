@@ -21,6 +21,9 @@ inputs:
   github-token:
     description: "GitHub token for deployment status"
     required: true
+  working-directory:
+    description: "Directory containing wrangler.toml/wrangler.jsonc"
+    required: false
 
 outputs:
   deployment-id:
@@ -47,6 +50,7 @@ runs:
       with:
         apiToken: ${{ inputs.cloudflare-api-token }}
         accountId: ${{ inputs.cloudflare-account-id }}
+        workingDirectory: ${{ inputs.working-directory }}
         command: versions upload ${{ inputs.version-message && format('--message "{0}"', inputs.version-message) || '' }}
 
     - name: Deploy version to production
@@ -54,6 +58,7 @@ runs:
       with:
         apiToken: ${{ inputs.cloudflare-api-token }}
         accountId: ${{ inputs.cloudflare-account-id }}
+        workingDirectory: ${{ inputs.working-directory }}
         command: versions deploy ${{ steps.upload.outputs.version-id }}@100%
 
     - name: Update Deployment Status

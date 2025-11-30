@@ -20,6 +20,9 @@ inputs:
   github-token:
     description: "GitHub token for deployment status"
     required: true
+  working-directory:
+    description: "Directory containing wrangler.toml/wrangler.jsonc"
+    required: false
 
 outputs:
   deployment-id:
@@ -38,6 +41,7 @@ runs:
       with:
         apiToken: ${{ inputs.cloudflare-api-token }}
         accountId: ${{ inputs.cloudflare-account-id }}
+        workingDirectory: ${{ inputs.working-directory }}
         command: versions upload --preview-alias ${{ inputs.preview-alias }} ${{ inputs.version-message && format('--message "{0}"', inputs.version-message) || '' }}
 
     - name: Extract alias URL
