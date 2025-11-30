@@ -1,0 +1,65 @@
+name: "Deploy to Cloudflare (Preview)"
+description: "Deploy preview version to Cloudflare Workers with alias and create GitHub deployment"
+
+inputs:
+  cloudflare-api-token:
+    description: "Cloudflare API token"
+    required: true
+  cloudflare-account-id:
+    description: "Cloudflare account ID"
+    required: true
+  preview-alias:
+    description: "Preview alias name (e.g., pr-123)"
+    required: true
+  environment-name:
+    description: "GitHub environment name (defaults to preview-alias)"
+    required: false
+  version-message:
+    description: "Message to attach to the version (e.g., commit hash and message)"
+    required: false
+  github-token:
+    description: "GitHub token for deployment status"
+    required: true
+
+outputs:
+  deployment-id:
+    description: "GitHub deployment ID"
+    value: ${{ steps.deployment.outputs.deployment_id }}
+  deployment-url:
+    description: "Preview deployment URL (alias URL)"
+    value: ${{ steps.extract-url.outputs.alias-url }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Deploy to Cloudflare Workers (Preview)
+      uses: cloudflare/wrangler-action@v3
+      id: wrangler
+      with:
+        apiToken: ${{ inputs.cloudflare-api-token }}
+        accountId: ${{ inputs.cloudflare-account-id }}
+        command: versions upload --preview-alias ${{ inputs.preview-alias }} ${{ inputs.version-message && format('--message "{0}"', inputs.version-message) || '' }}
+
+    - name: Extract alias URL
+      id: extract-url
+      shell: bash
+      run: |
+        ALIAS_URL=$(echo "${{ steps.wrangler.outputs.command-output }}" | grep -oE 'https://[^ ]+\.workers\.dev' | grep "${{ inputs.preview-alias }}" | head -1)
+        echo "alias-url=$ALIAS_URL" >> $GITHUB_OUTPUT
+
+    - name: Create GitHub Deployment
+      uses: chrnorm/deployment-action@v2
+      id: deployment
+      with:
+        token: ${{ inputs.github-token }}
+        environment: ${{ inputs.environment-name || inputs.preview-alias }}
+        environment-url: ${{ steps.extract-url.outputs.alias-url }}
+
+    - name: Update Deployment Status
+      if: always()
+      uses: chrnorm/deployment-status@v2
+      with:
+        token: ${{ inputs.github-token }}
+        deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+        environment-url: ${{ steps.extract-url.outputs.alias-url }}
+        state: ${{ job.status == 'success' && 'success' || 'failure' }}

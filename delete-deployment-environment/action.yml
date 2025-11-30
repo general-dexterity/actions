@@ -1,0 +1,19 @@
+name: "Delete Deployment Environment"
+description: "Delete a GitHub deployment environment"
+
+inputs:
+  github-token:
+    description: "GitHub token with deployments:write permission"
+    required: true
+  environment-name:
+    description: "Name of the environment to delete"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Delete GitHub environment
+      uses: strumwolf/delete-deployment-environment@v3
+      with:
+        token: ${{ inputs.github-token }}
+        environment: ${{ inputs.environment-name }}

@@ -1,0 +1,66 @@
+name: "Deploy to Cloudflare (Production)"
+description: "Deploy to Cloudflare Workers production traffic using versions"
+
+inputs:
+  cloudflare-api-token:
+    description: "Cloudflare API token"
+    required: true
+  cloudflare-account-id:
+    description: "Cloudflare account ID"
+    required: true
+  environment-url:
+    description: "Deployment URL (e.g., https://example.com)"
+    required: true
+  environment-name:
+    description: "GitHub environment name"
+    required: false
+    default: "production"
+  version-message:
+    description: "Message to attach to the version (e.g., commit hash and message)"
+    required: false
+  github-token:
+    description: "GitHub token for deployment status"
+    required: true
+
+outputs:
+  deployment-id:
+    description: "GitHub deployment ID"
+    value: ${{ steps.deployment.outputs.deployment_id }}
+  version-id:
+    description: "Cloudflare version ID"
+    value: ${{ steps.upload.outputs.version-id }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create GitHub Deployment
+      uses: chrnorm/deployment-action@v2
+      id: deployment
+      with:
+        token: ${{ inputs.github-token }}
+        environment: ${{ inputs.environment-name }}
+        environment-url: ${{ inputs.environment-url }}
+
+    - name: Upload version
+      uses: cloudflare/wrangler-action@v3
+      id: upload
+      with:
+        apiToken: ${{ inputs.cloudflare-api-token }}
+        accountId: ${{ inputs.cloudflare-account-id }}
+        command: versions upload ${{ inputs.version-message && format('--message "{0}"', inputs.version-message) || '' }}
+
+    - name: Deploy version to production
+      uses: cloudflare/wrangler-action@v3
+      with:
+        apiToken: ${{ inputs.cloudflare-api-token }}
+        accountId: ${{ inputs.cloudflare-account-id }}
+        command: versions deploy ${{ steps.upload.outputs.version-id }}@100%
+
+    - name: Update Deployment Status
+      if: always()
+      uses: chrnorm/deployment-status@v2
+      with:
+        token: ${{ inputs.github-token }}
+        deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+        environment-url: ${{ inputs.environment-url }}
+        state: ${{ job.status == 'success' && 'success' || 'failure' }}

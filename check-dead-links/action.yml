@@ -1,0 +1,16 @@
+name: "Check Dead Links"
+description: "Check for dead links in built site using hyperlink"
+
+inputs:
+  directory:
+    description: "Directory containing the built site to check"
+    required: true
+    default: "dist"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check dead links
+      uses: untitaker/hyperlink@0.1.32
+      with:
+        args: ${{ inputs.directory }}
