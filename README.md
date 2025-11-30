@@ -2,13 +2,23 @@
 
 Reusable GitHub Actions for General Dexterity projects.
 
+## Versioning
+
+Use the `@v1` tag for the latest stable v1.x.x release:
+
+```yaml
+uses: general-dexterity/actions/pnpm-install@v1
+```
+
+For maximum stability, pin to a specific version (e.g., `@v1.0.0`).
+
 ## Actions
 
 ### `cloudflare-deploy-production`
 Deploy to Cloudflare Workers production traffic using versions.
 
 ```yaml
-- uses: general-dexterity/actions/cloudflare-deploy-production@main
+- uses: general-dexterity/actions/cloudflare-deploy-production@v1
   with:
     cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -21,7 +31,7 @@ Deploy to Cloudflare Workers production traffic using versions.
 Deploy preview version with alias to Cloudflare Workers.
 
 ```yaml
-- uses: general-dexterity/actions/cloudflare-deploy-preview@main
+- uses: general-dexterity/actions/cloudflare-deploy-preview@v1
   with:
     cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -34,7 +44,7 @@ Deploy preview version with alias to Cloudflare Workers.
 Check for dead links in built site using hyperlink.
 
 ```yaml
-- uses: general-dexterity/actions/check-dead-links@main
+- uses: general-dexterity/actions/check-dead-links@v1
   with:
     directory: dist
 ```
@@ -43,7 +53,7 @@ Check for dead links in built site using hyperlink.
 Delete a GitHub deployment environment.
 
 ```yaml
-- uses: general-dexterity/actions/delete-deployment-environment@main
+- uses: general-dexterity/actions/delete-deployment-environment@v1
   with:
     github-token: ${{ github.token }}
     environment-name: pr-123
@@ -53,5 +63,5 @@ Delete a GitHub deployment environment.
 Install pnpm and dependencies with caching.
 
 ```yaml
-- uses: general-dexterity/actions/pnpm-install@main
+- uses: general-dexterity/actions/pnpm-install@v1
 ```
