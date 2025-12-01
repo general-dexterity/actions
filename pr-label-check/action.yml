@@ -1,0 +1,65 @@
+name: "PR Label Check"
+description: "Fails CI if specified labels are present on a PR"
+
+inputs:
+  blocking-labels:
+    description: "Comma-separated list of labels that should block the PR"
+    required: false
+    default: "blocked"
+  github-token:
+    description: "GitHub token for API access"
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  blocked:
+    description: "Whether the PR is blocked (true/false)"
+    value: ${{ steps.check-labels.outputs.blocked }}
+  blocking-label:
+    description: "The label that caused the block (if any)"
+    value: ${{ steps.check-labels.outputs.blocking-label }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check PR labels
+      id: check-labels
+      shell: bash
+      env:
+        BLOCKING_LABELS: ${{ inputs.blocking-labels }}
+        PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+      run: |
+        echo "Checking PR labels..."
+        echo "Blocking labels: $BLOCKING_LABELS"
+        echo "PR labels: $PR_LABELS"
+
+        # Convert comma-separated strings to arrays
+        IFS=',' read -ra BLOCKING_ARR <<< "$BLOCKING_LABELS"
+        IFS=',' read -ra PR_ARR <<< "$PR_LABELS"
+
+        blocked="false"
+        blocking_label=""
+
+        for blocking in "${BLOCKING_ARR[@]}"; do
+          # Trim whitespace
+          blocking=$(echo "$blocking" | xargs)
+          for pr_label in "${PR_ARR[@]}"; do
+            # Trim whitespace
+            pr_label=$(echo "$pr_label" | xargs)
+            if [ "$blocking" = "$pr_label" ]; then
+              blocked="true"
+              blocking_label="$blocking"
+              break 2
+            fi
+          done
+        done
+
+        echo "blocked=$blocked" >> "$GITHUB_OUTPUT"
+        echo "blocking-label=$blocking_label" >> "$GITHUB_OUTPUT"
+
+        if [ "$blocked" = "true" ]; then
+          echo "::error::PR is blocked by label: $blocking_label"
+          exit 1
+        fi
+
+        echo "PR is not blocked by any labels"

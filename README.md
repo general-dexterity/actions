@@ -65,3 +65,24 @@ Install pnpm and dependencies with caching.
 ```yaml
 - uses: general-dexterity/actions/pnpm-install@v1
 ```
+
+### `pr-label-check`
+Fail CI if specified labels are present on a PR. Useful for blocking PRs with labels like "blocked", "do-not-merge", or "wip".
+
+Create a dedicated workflow file to trigger on label changes:
+
+```yaml
+# .github/workflows/pr-label-check.yml
+name: PR Label Check
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: general-dexterity/actions/pr-label-check@v1
+        # with:
+        #   blocking-labels: blocked,do-not-merge  # optional, defaults to "blocked"
+```
