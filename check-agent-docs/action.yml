@@ -1,0 +1,250 @@
+name: "Check Agent Docs"
+description: "Uses Claude Code to verify AGENTS.md and CLAUDE.md are up-to-date. Adds labels and comments on PRs based on freshness score."
+
+inputs:
+  anthropic-api-key:
+    description: "Anthropic API key for Claude Code (direct API access)"
+    required: false
+  claude-code-oauth-token:
+    description: "Claude Code OAuth token from /install-github-app (alternative to API key)"
+    required: false
+  doc-files:
+    description: "Comma-separated list of agent doc files to check for freshness"
+    required: false
+    default: "AGENTS.md,CLAUDE.md,.claude/CLAUDE.md"
+  additional-instructions:
+    description: "Extra instructions for scoring (e.g., 'Focus on API endpoints accuracy' or 'Ignore styling conventions')"
+    required: false
+    default: ""
+  model:
+    description: "Claude model to use"
+    required: false
+    default: "claude-sonnet-4-20250514"
+  threshold-blocking:
+    description: "Score below this (0-100) adds blocking label and fails check"
+    required: false
+    default: "30"
+  threshold-warning:
+    description: "Score below this (0-100) adds warning label"
+    required: false
+    default: "75"
+  label-blocking:
+    description: "Label to add when docs are severely outdated (can be used with pr-label-check)"
+    required: false
+    default: "agent-docs-critical"
+  label-warning:
+    description: "Label to add when docs need minor updates"
+    required: false
+    default: "agent-docs-needs-update"
+  github-token:
+    description: "GitHub token for API access (needs issues/PRs write permission)"
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  skipped:
+    description: "Whether the check was skipped due to missing configuration"
+    value: ${{ steps.check-config.outputs.skipped }}
+  score:
+    description: "Documentation freshness score (0-100)"
+    value: ${{ steps.post-comment.outputs.score }}
+  status:
+    description: "Status: pass, warning, or blocking"
+    value: ${{ steps.post-comment.outputs.status }}
+  label-added:
+    description: "Label that was added (if any)"
+    value: ${{ steps.post-comment.outputs.label }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check configuration
+      id: check-config
+      shell: bash
+      env:
+        HAS_API_KEY: ${{ inputs.anthropic-api-key != '' }}
+        HAS_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token != '' }}
+      run: |
+        if [ "$HAS_API_KEY" != "true" ] && [ "$HAS_OAUTH_TOKEN" != "true" ]; then
+          echo "::warning::Check Agent Docs: No auth configured. Provide anthropic-api-key or claude-code-oauth-token. Run '/install-github-app' in Claude Code to set up."
+          echo "skipped=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Find doc files
+      if: steps.check-config.outputs.skipped == 'false'
+      id: find-docs
+      shell: bash
+      run: |
+        IFS=',' read -ra DOC_FILES <<< "${{ inputs.doc-files }}"
+        found_files=""
+        for file in "${DOC_FILES[@]}"; do
+          file=$(echo "$file" | xargs)
+          if [ -f "$file" ]; then
+            if [ -n "$found_files" ]; then
+              found_files="$found_files, $file"
+            else
+              found_files="$file"
+            fi
+          fi
+        done
+
+        if [ -z "$found_files" ]; then
+          echo "::notice::No agent doc files found in repository. Skipping check."
+          echo "has-docs=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "Found doc files: $found_files"
+          echo "has-docs=true" >> "$GITHUB_OUTPUT"
+          echo "files=$found_files" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Run Claude Code check
+      if: steps.check-config.outputs.skipped == 'false' && steps.find-docs.outputs.has-docs == 'true'
+      id: run-check
+      uses: anthropics/claude-code-action@v1
+      with:
+        prompt: |
+          You are checking if the agent documentation files are up-to-date with the codebase.
+
+          ## Files to check
+          ${{ steps.find-docs.outputs.files }}
+
+          ## Your task
+          1. Read each documentation file listed above
+          2. Explore the codebase to understand the actual structure, commands, and conventions
+          3. Compare the documentation against reality
+          4. Score the documentation freshness from 0-100%
+
+          ## Scoring criteria
+          - 100%: Documentation is fully accurate, all commands/paths/structures match reality
+          - 75-99%: Minor issues (typos, slightly outdated examples, missing optional info)
+          - 30-74%: Moderate issues (missing sections, some incorrect commands/paths)
+          - 0-29%: Severely outdated (wrong structure, broken commands, misleading info)
+
+          ## What to check
+          - Directory structure matches what's documented
+          - Commands listed actually work (check package.json scripts, Makefile, etc.)
+          - File paths and patterns mentioned still exist
+          - Conventions described match actual code patterns
+          - Any new important files/directories that should be documented
+
+          ## Additional instructions from repository maintainers
+          <additional-instructions>
+          ${{ inputs.additional-instructions || 'None provided - use default scoring criteria above.' }}
+          </additional-instructions>
+
+          ## CRITICAL: Output instructions
+          After your analysis, you MUST write a JSON file to /tmp/agent-docs-result.json with this exact structure:
+          {
+            "score": <number 0-100>,
+            "summary": "<one sentence summary>",
+            "issues": ["<issue 1>", "<issue 2>", ...],
+            "fixes": ["<fix 1>", "<fix 2>", ...]
+          }
+
+          Use the Write tool or bash to create this file. This is your ONLY deliverable.
+          Do NOT post comments or create issues - just write the JSON file.
+        claude_args: "--model ${{ inputs.model }} --allowed-tools 'Bash(cat:*),Bash(echo:*),Write,Read,Glob,Grep'"
+        claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
+        github_token: ${{ inputs.github-token }}
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+
+    - name: Post comment and apply labels
+      if: steps.check-config.outputs.skipped == 'false' && steps.find-docs.outputs.has-docs == 'true'
+      id: post-comment
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        THRESHOLD_BLOCKING: ${{ inputs.threshold-blocking }}
+        THRESHOLD_WARNING: ${{ inputs.threshold-warning }}
+        LABEL_BLOCKING: ${{ inputs.label-blocking }}
+        LABEL_WARNING: ${{ inputs.label-warning }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        if [ -z "$PR_NUMBER" ]; then
+          echo "Not running on a PR, skipping"
+          echo "score=unknown" >> "$GITHUB_OUTPUT"
+          echo "status=skipped" >> "$GITHUB_OUTPUT"
+          echo "label=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Read the result file
+        if [ ! -f /tmp/agent-docs-result.json ]; then
+          echo "::error::Result file not found at /tmp/agent-docs-result.json"
+          echo "score=unknown" >> "$GITHUB_OUTPUT"
+          echo "status=error" >> "$GITHUB_OUTPUT"
+          echo "label=" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
+        RESULT=$(cat /tmp/agent-docs-result.json)
+        echo "Result: $RESULT"
+
+        SCORE=$(echo "$RESULT" | jq -r '.score // empty')
+        SUMMARY=$(echo "$RESULT" | jq -r '.summary // "No summary provided"')
+        ISSUES=$(echo "$RESULT" | jq -r '.issues // [] | if length == 0 then "None" else map("- " + .) | join("\n") end')
+        FIXES=$(echo "$RESULT" | jq -r '.fixes // [] | if length == 0 then "None needed" else map("- " + .) | join("\n") end')
+
+        if [ -z "$SCORE" ]; then
+          echo "::error::Could not parse score from result"
+          echo "score=unknown" >> "$GITHUB_OUTPUT"
+          echo "status=error" >> "$GITHUB_OUTPUT"
+          echo "label=" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
+        echo "Parsed score: $SCORE"
+        echo "score=$SCORE" >> "$GITHUB_OUTPUT"
+
+        # Determine emoji based on score
+        if [ "$SCORE" -ge 75 ]; then
+          EMOJI="✅"
+        elif [ "$SCORE" -ge 30 ]; then
+          EMOJI="⚠️"
+        else
+          EMOJI="🔴"
+        fi
+
+        # Build and post the comment
+        COMMENT=$(cat <<EOF
+        ## Agent Docs Freshness Check
+
+        **Score: ${SCORE}%** ${EMOJI}
+
+        ### Summary
+        ${SUMMARY}
+
+        ### Issues Found
+        ${ISSUES}
+
+        ### Suggested Fixes
+        ${FIXES}
+        EOF
+        )
+
+        gh pr comment "$PR_NUMBER" --body "$COMMENT"
+
+        # Remove existing agent-docs labels first
+        gh pr edit "$PR_NUMBER" --remove-label "$LABEL_BLOCKING" 2>/dev/null || true
+        gh pr edit "$PR_NUMBER" --remove-label "$LABEL_WARNING" 2>/dev/null || true
+
+        # Determine status and apply appropriate label
+        if [ "$SCORE" -lt "$THRESHOLD_BLOCKING" ]; then
+          echo "status=blocking" >> "$GITHUB_OUTPUT"
+          echo "label=$LABEL_BLOCKING" >> "$GITHUB_OUTPUT"
+          gh pr edit "$PR_NUMBER" --add-label "$LABEL_BLOCKING"
+          echo "::error::Agent docs freshness score ($SCORE%) is below blocking threshold ($THRESHOLD_BLOCKING%). Update documentation before merging."
+          exit 1
+        elif [ "$SCORE" -lt "$THRESHOLD_WARNING" ]; then
+          echo "status=warning" >> "$GITHUB_OUTPUT"
+          echo "label=$LABEL_WARNING" >> "$GITHUB_OUTPUT"
+          gh pr edit "$PR_NUMBER" --add-label "$LABEL_WARNING"
+          echo "::warning::Agent docs freshness score ($SCORE%) is below warning threshold ($THRESHOLD_WARNING%). Consider updating documentation."
+        else
+          echo "status=pass" >> "$GITHUB_OUTPUT"
+          echo "label=" >> "$GITHUB_OUTPUT"
+          echo "Agent docs freshness score ($SCORE%) is good."
+        fi
