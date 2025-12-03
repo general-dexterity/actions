@@ -99,39 +99,6 @@ runs:
           echo "files=$found_files" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Create JSON schema file
-      if: steps.check-config.outputs.skipped == 'false' && steps.find-docs.outputs.has-docs == 'true'
-      shell: bash
-      run: |
-        cat > /tmp/agent-docs-schema.json << 'SCHEMA'
-        {
-          "type": "object",
-          "properties": {
-            "score": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 100,
-              "description": "Documentation freshness score from 0-100"
-            },
-            "summary": {
-              "type": "string",
-              "description": "One sentence summary of findings"
-            },
-            "issues": {
-              "type": "array",
-              "items": { "type": "string" },
-              "description": "List of specific issues found"
-            },
-            "fixes": {
-              "type": "array",
-              "items": { "type": "string" },
-              "description": "List of suggested fixes"
-            }
-          },
-          "required": ["score", "summary", "issues", "fixes"]
-        }
-        SCHEMA
-
     - name: Run Claude Code check
       if: steps.check-config.outputs.skipped == 'false' && steps.find-docs.outputs.has-docs == 'true'
       id: run-check
@@ -167,10 +134,18 @@ runs:
           ${{ inputs.additional-instructions || 'None provided - use default scoring criteria above.' }}
           </additional-instructions>
 
-          ## Output
-          Return your findings as structured JSON matching the schema. Do NOT post comments or create issues.
-          Just analyze and return your findings - the action will handle posting.
-        claude_args: "--model ${{ inputs.model }} --output-format json --json-schema /tmp/agent-docs-schema.json"
+          ## CRITICAL: Output instructions
+          After your analysis, you MUST write a JSON file to /tmp/agent-docs-result.json with this exact structure:
+          {
+            "score": <number 0-100>,
+            "summary": "<one sentence summary>",
+            "issues": ["<issue 1>", "<issue 2>", ...],
+            "fixes": ["<fix 1>", "<fix 2>", ...]
+          }
+
+          Use the Write tool or bash to create this file. This is your ONLY deliverable.
+          Do NOT post comments or create issues - just write the JSON file.
+        claude_args: "--model ${{ inputs.model }} --allowed-tools 'Bash(cat:*),Bash(echo:*),Write,Read,Glob,Grep'"
         claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
         github_token: ${{ inputs.github-token }}
       env:
@@ -187,7 +162,6 @@ runs:
         LABEL_BLOCKING: ${{ inputs.label-blocking }}
         LABEL_WARNING: ${{ inputs.label-warning }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
-        STRUCTURED_OUTPUT: ${{ steps.run-check.outputs.structured_output }}
       run: |
         if [ -z "$PR_NUMBER" ]; then
           echo "Not running on a PR, skipping"
@@ -197,24 +171,25 @@ runs:
           exit 0
         fi
 
-        # Parse the structured output
-        if [ -z "$STRUCTURED_OUTPUT" ]; then
-          echo "::error::No structured output from Claude"
+        # Read the result file
+        if [ ! -f /tmp/agent-docs-result.json ]; then
+          echo "::error::Result file not found at /tmp/agent-docs-result.json"
           echo "score=unknown" >> "$GITHUB_OUTPUT"
           echo "status=error" >> "$GITHUB_OUTPUT"
           echo "label=" >> "$GITHUB_OUTPUT"
           exit 1
         fi
 
-        echo "Structured output: $STRUCTURED_OUTPUT"
+        RESULT=$(cat /tmp/agent-docs-result.json)
+        echo "Result: $RESULT"
 
-        SCORE=$(echo "$STRUCTURED_OUTPUT" | jq -r '.score // empty')
-        SUMMARY=$(echo "$STRUCTURED_OUTPUT" | jq -r '.summary // "No summary provided"')
-        ISSUES=$(echo "$STRUCTURED_OUTPUT" | jq -r '.issues // [] | if length == 0 then "None" else map("- " + .) | join("\n") end')
-        FIXES=$(echo "$STRUCTURED_OUTPUT" | jq -r '.fixes // [] | if length == 0 then "None needed" else map("- " + .) | join("\n") end')
+        SCORE=$(echo "$RESULT" | jq -r '.score // empty')
+        SUMMARY=$(echo "$RESULT" | jq -r '.summary // "No summary provided"')
+        ISSUES=$(echo "$RESULT" | jq -r '.issues // [] | if length == 0 then "None" else map("- " + .) | join("\n") end')
+        FIXES=$(echo "$RESULT" | jq -r '.fixes // [] | if length == 0 then "None needed" else map("- " + .) | join("\n") end')
 
         if [ -z "$SCORE" ]; then
-          echo "::error::Could not parse score from Claude's output"
+          echo "::error::Could not parse score from result"
           echo "score=unknown" >> "$GITHUB_OUTPUT"
           echo "status=error" >> "$GITHUB_OUTPUT"
           echo "label=" >> "$GITHUB_OUTPUT"
