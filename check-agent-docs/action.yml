@@ -1,5 +1,5 @@
 name: "Check Agent Docs"
-description: "Uses Claude Code to verify AGENTS.md and CLAUDE.md files are up-to-date with the codebase"
+description: "Uses Claude Code to verify AGENTS.md and CLAUDE.md are up-to-date. Adds labels and comments on PRs based on freshness score."
 
 inputs:
   anthropic-api-key:
@@ -16,12 +16,24 @@ inputs:
     description: "Claude model to use"
     required: false
     default: "claude-sonnet-4-20250514"
-  create-issue:
-    description: "Create an issue if docs are outdated (true/false)"
+  threshold-blocking:
+    description: "Score below this (0-100) adds blocking label and fails check"
     required: false
-    default: "true"
+    default: "30"
+  threshold-warning:
+    description: "Score below this (0-100) adds warning label"
+    required: false
+    default: "75"
+  label-blocking:
+    description: "Label to add when docs are severely outdated (can be used with pr-label-check)"
+    required: false
+    default: "agent-docs-outdated"
+  label-warning:
+    description: "Label to add when docs need minor updates"
+    required: false
+    default: "agent-docs-stale"
   github-token:
-    description: "GitHub token for API access"
+    description: "GitHub token for API access (needs issues/PRs write permission)"
     required: false
     default: ${{ github.token }}
 
@@ -29,12 +41,15 @@ outputs:
   skipped:
     description: "Whether the check was skipped due to missing configuration"
     value: ${{ steps.check-config.outputs.skipped }}
-  outdated:
-    description: "Whether any docs were found to be outdated"
-    value: ${{ steps.run-check.outputs.outdated }}
-  issue-url:
-    description: "URL of the created issue (if any)"
-    value: ${{ steps.run-check.outputs.issue-url }}
+  score:
+    description: "Documentation freshness score (0-100)"
+    value: ${{ steps.parse-result.outputs.score }}
+  status:
+    description: "Status: pass, warning, or blocking"
+    value: ${{ steps.parse-result.outputs.status }}
+  label-added:
+    description: "Label that was added (if any)"
+    value: ${{ steps.parse-result.outputs.label }}
 
 runs:
   using: "composite"
@@ -51,11 +66,6 @@ runs:
           echo "skipped=true" >> "$GITHUB_OUTPUT"
         else
           echo "skipped=false" >> "$GITHUB_OUTPUT"
-          if [ "$HAS_OAUTH_TOKEN" = "true" ]; then
-            echo "auth=oauth" >> "$GITHUB_OUTPUT"
-          else
-            echo "auth=api-key" >> "$GITHUB_OUTPUT"
-          fi
         fi
 
     - name: Find doc files
@@ -66,7 +76,7 @@ runs:
         IFS=',' read -ra DOC_FILES <<< "${{ inputs.doc-files }}"
         found_files=""
         for file in "${DOC_FILES[@]}"; do
-          file=$(echo "$file" | xargs)  # trim whitespace
+          file=$(echo "$file" | xargs)
           if [ -f "$file" ]; then
             if [ -n "$found_files" ]; then
               found_files="$found_files, $file"
@@ -92,6 +102,7 @@ runs:
       with:
         prompt: |
           You are checking if the agent documentation files are up-to-date with the codebase.
+          This is running on a Pull Request, so comment your findings on the PR.
 
           ## Files to check
           ${{ steps.find-docs.outputs.files }}
@@ -100,26 +111,105 @@ runs:
           1. Read each documentation file listed above
           2. Explore the codebase to understand the actual structure, commands, and conventions
           3. Compare the documentation against reality
-          4. Determine if any documentation is outdated, missing information, or incorrect
+          4. Score the documentation freshness from 0-100%
 
-          ## What to check for
+          ## Scoring criteria
+          - 100%: Documentation is fully accurate, all commands/paths/structures match reality
+          - 75-99%: Minor issues (typos, slightly outdated examples, missing optional info)
+          - 30-74%: Moderate issues (missing sections, some incorrect commands/paths)
+          - 0-29%: Severely outdated (wrong structure, broken commands, misleading info)
+
+          ## What to check
           - Directory structure matches what's documented
           - Commands listed actually work (check package.json scripts, Makefile, etc.)
           - File paths and patterns mentioned still exist
           - Conventions described match actual code patterns
           - Any new important files/directories that should be documented
 
-          ## Output
-          If documentation is accurate: Report that no updates are needed.
+          ## Required output format
+          You MUST comment on the PR with your findings using this exact format:
 
-          If documentation is outdated: ${{ inputs.create-issue == 'true' && 'Create a GitHub issue with:' || 'Report:' }}
-          - Title: "Update agent documentation: [brief description]"
-          - Body: Specific items that need updating, with suggested changes
-          - Label the issue with "documentation" if creating one
+          ```
+          ## Agent Docs Freshness Check
 
-          Be specific about what's wrong and what the fix should be.
+          **Score: [X]%** [emoji based on score: ✅ for 75+, ⚠️ for 30-74, 🔴 for <30]
+
+          ### Summary
+          [One sentence summary]
+
+          ### Issues Found
+          [Bulleted list of specific issues, or "None" if score is 100%]
+
+          ### Suggested Fixes
+          [Bulleted list of specific fixes needed, or "None needed" if score is 100%]
+
+          ---
+          <!-- AGENT_DOCS_SCORE:[X] -->
+          ```
+
+          The HTML comment at the end is required for automated parsing. Replace [X] with the numeric score.
         claude_args: "--model ${{ inputs.model }}"
         claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
         github_token: ${{ inputs.github-token }}
       env:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+
+    - name: Parse result and apply labels
+      if: steps.check-config.outputs.skipped == 'false' && steps.find-docs.outputs.has-docs == 'true'
+      id: parse-result
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        THRESHOLD_BLOCKING: ${{ inputs.threshold-blocking }}
+        THRESHOLD_WARNING: ${{ inputs.threshold-warning }}
+        LABEL_BLOCKING: ${{ inputs.label-blocking }}
+        LABEL_WARNING: ${{ inputs.label-warning }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        # Get the PR comments to find the score
+        if [ -z "$PR_NUMBER" ]; then
+          echo "Not running on a PR, skipping label management"
+          echo "score=unknown" >> "$GITHUB_OUTPUT"
+          echo "status=skipped" >> "$GITHUB_OUTPUT"
+          echo "label=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Fetch recent comments to find the score
+        COMMENTS=$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[-5:][].body' 2>/dev/null || echo "")
+
+        # Extract score from the HTML comment marker
+        SCORE=$(echo "$COMMENTS" | grep -oP 'AGENT_DOCS_SCORE:\K[0-9]+' | tail -1 || echo "")
+
+        if [ -z "$SCORE" ]; then
+          echo "Could not parse score from Claude's comment"
+          echo "score=unknown" >> "$GITHUB_OUTPUT"
+          echo "status=unknown" >> "$GITHUB_OUTPUT"
+          echo "label=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "Parsed score: $SCORE"
+        echo "score=$SCORE" >> "$GITHUB_OUTPUT"
+
+        # Remove existing agent-docs labels first
+        gh pr edit "$PR_NUMBER" --remove-label "$LABEL_BLOCKING" 2>/dev/null || true
+        gh pr edit "$PR_NUMBER" --remove-label "$LABEL_WARNING" 2>/dev/null || true
+
+        # Determine status and apply appropriate label
+        if [ "$SCORE" -lt "$THRESHOLD_BLOCKING" ]; then
+          echo "status=blocking" >> "$GITHUB_OUTPUT"
+          echo "label=$LABEL_BLOCKING" >> "$GITHUB_OUTPUT"
+          gh pr edit "$PR_NUMBER" --add-label "$LABEL_BLOCKING"
+          echo "::error::Agent docs freshness score ($SCORE%) is below blocking threshold ($THRESHOLD_BLOCKING%). Update documentation before merging."
+          exit 1
+        elif [ "$SCORE" -lt "$THRESHOLD_WARNING" ]; then
+          echo "status=warning" >> "$GITHUB_OUTPUT"
+          echo "label=$LABEL_WARNING" >> "$GITHUB_OUTPUT"
+          gh pr edit "$PR_NUMBER" --add-label "$LABEL_WARNING"
+          echo "::warning::Agent docs freshness score ($SCORE%) is below warning threshold ($THRESHOLD_WARNING%). Consider updating documentation."
+        else
+          echo "status=pass" >> "$GITHUB_OUTPUT"
+          echo "label=" >> "$GITHUB_OUTPUT"
+          echo "Agent docs freshness score ($SCORE%) is good."
+        fi
