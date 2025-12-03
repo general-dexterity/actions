@@ -6,7 +6,7 @@ Reusable GitHub Actions for General Dexterity projects.
 
 Each action lives in its own directory with a single `action.yml` file (composite actions, no custom scripts).
 
-Actions: `check-dead-links`, `cloudflare-deploy-preview`, `cloudflare-deploy-production`, `delete-deployment-environment`, `pnpm-install`, `pr-label-check`
+Actions: `check-agent-docs`, `check-dead-links`, `cloudflare-deploy-preview`, `cloudflare-deploy-production`, `delete-deployment-environment`, `pnpm-install`, `pr-label-check`
 
 ## Commands
 

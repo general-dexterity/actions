@@ -1,0 +1,113 @@
+name: "Check Agent Docs"
+description: "Uses Claude Code to verify AGENTS.md and CLAUDE.md files are up-to-date with the codebase"
+
+inputs:
+  anthropic-api-key:
+    description: "Anthropic API key for Claude Code. If not provided, the check is skipped with a warning."
+    required: false
+  doc-files:
+    description: "Comma-separated list of doc files to check"
+    required: false
+    default: "AGENTS.md,CLAUDE.md,.claude/CLAUDE.md"
+  model:
+    description: "Claude model to use"
+    required: false
+    default: "claude-sonnet-4-20250514"
+  create-issue:
+    description: "Create an issue if docs are outdated (true/false)"
+    required: false
+    default: "true"
+  github-token:
+    description: "GitHub token for API access"
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  skipped:
+    description: "Whether the check was skipped due to missing configuration"
+    value: ${{ steps.check-config.outputs.skipped }}
+  outdated:
+    description: "Whether any docs were found to be outdated"
+    value: ${{ steps.run-check.outputs.outdated }}
+  issue-url:
+    description: "URL of the created issue (if any)"
+    value: ${{ steps.run-check.outputs.issue-url }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check configuration
+      id: check-config
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.anthropic-api-key }}" ]; then
+          echo "::warning::Check Agent Docs: ANTHROPIC_API_KEY not configured. Skipping check. Run '/install-github-app' in Claude Code to set up."
+          echo "skipped=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Find doc files
+      if: steps.check-config.outputs.skipped == 'false'
+      id: find-docs
+      shell: bash
+      run: |
+        IFS=',' read -ra DOC_FILES <<< "${{ inputs.doc-files }}"
+        found_files=""
+        for file in "${DOC_FILES[@]}"; do
+          file=$(echo "$file" | xargs)  # trim whitespace
+          if [ -f "$file" ]; then
+            if [ -n "$found_files" ]; then
+              found_files="$found_files, $file"
+            else
+              found_files="$file"
+            fi
+          fi
+        done
+
+        if [ -z "$found_files" ]; then
+          echo "::notice::No agent doc files found in repository. Skipping check."
+          echo "has-docs=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "Found doc files: $found_files"
+          echo "has-docs=true" >> "$GITHUB_OUTPUT"
+          echo "files=$found_files" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Run Claude Code check
+      if: steps.check-config.outputs.skipped == 'false' && steps.find-docs.outputs.has-docs == 'true'
+      id: run-check
+      uses: anthropics/claude-code-action@v1
+      with:
+        prompt: |
+          You are checking if the agent documentation files are up-to-date with the codebase.
+
+          ## Files to check
+          ${{ steps.find-docs.outputs.files }}
+
+          ## Your task
+          1. Read each documentation file listed above
+          2. Explore the codebase to understand the actual structure, commands, and conventions
+          3. Compare the documentation against reality
+          4. Determine if any documentation is outdated, missing information, or incorrect
+
+          ## What to check for
+          - Directory structure matches what's documented
+          - Commands listed actually work (check package.json scripts, Makefile, etc.)
+          - File paths and patterns mentioned still exist
+          - Conventions described match actual code patterns
+          - Any new important files/directories that should be documented
+
+          ## Output
+          If documentation is accurate: Report that no updates are needed.
+
+          If documentation is outdated: ${{ inputs.create-issue == 'true' && 'Create a GitHub issue with:' || 'Report:' }}
+          - Title: "Update agent documentation: [brief description]"
+          - Body: Specific items that need updating, with suggested changes
+          - Label the issue with "documentation" if creating one
+
+          Be specific about what's wrong and what the fix should be.
+        claude_args: "--model ${{ inputs.model }}"
+        github_token: ${{ inputs.github-token }}
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
