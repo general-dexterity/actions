@@ -9,9 +9,13 @@ inputs:
     description: "Claude Code OAuth token from /install-github-app (alternative to API key)"
     required: false
   doc-files:
-    description: "Comma-separated list of doc files to check"
+    description: "Comma-separated list of agent doc files to check for freshness"
     required: false
     default: "AGENTS.md,CLAUDE.md,.claude/CLAUDE.md"
+  additional-instructions:
+    description: "Extra instructions for scoring (e.g., 'Focus on API endpoints accuracy' or 'Ignore styling conventions')"
+    required: false
+    default: ""
   model:
     description: "Claude model to use"
     required: false
@@ -27,11 +31,11 @@ inputs:
   label-blocking:
     description: "Label to add when docs are severely outdated (can be used with pr-label-check)"
     required: false
-    default: "agent-docs-outdated"
+    default: "agent-docs-critical"
   label-warning:
     description: "Label to add when docs need minor updates"
     required: false
-    default: "agent-docs-stale"
+    default: "agent-docs-needs-update"
   github-token:
     description: "GitHub token for API access (needs issues/PRs write permission)"
     required: false
@@ -125,6 +129,9 @@ runs:
           - File paths and patterns mentioned still exist
           - Conventions described match actual code patterns
           - Any new important files/directories that should be documented
+
+          ## Additional instructions from repository maintainers
+          ${{ inputs.additional-instructions || 'None provided - use default scoring criteria above.' }}
 
           ## Required output format
           You MUST comment on the PR with your findings using this exact format:
