@@ -131,7 +131,9 @@ runs:
           - Any new important files/directories that should be documented
 
           ## Additional instructions from repository maintainers
+          <additional-instructions>
           ${{ inputs.additional-instructions || 'None provided - use default scoring criteria above.' }}
+          </additional-instructions>
 
           ## Required output format
           You MUST comment on the PR with your findings using this exact format:
