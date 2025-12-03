@@ -3,7 +3,10 @@ description: "Uses Claude Code to verify AGENTS.md and CLAUDE.md files are up-to
 
 inputs:
   anthropic-api-key:
-    description: "Anthropic API key for Claude Code. If not provided, the check is skipped with a warning."
+    description: "Anthropic API key for Claude Code (direct API access)"
+    required: false
+  claude-code-oauth-token:
+    description: "Claude Code OAuth token from /install-github-app (alternative to API key)"
     required: false
   doc-files:
     description: "Comma-separated list of doc files to check"
@@ -39,12 +42,20 @@ runs:
     - name: Check configuration
       id: check-config
       shell: bash
+      env:
+        HAS_API_KEY: ${{ inputs.anthropic-api-key != '' }}
+        HAS_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token != '' }}
       run: |
-        if [ -z "${{ inputs.anthropic-api-key }}" ]; then
-          echo "::warning::Check Agent Docs: ANTHROPIC_API_KEY not configured. Skipping check. Run '/install-github-app' in Claude Code to set up."
+        if [ "$HAS_API_KEY" != "true" ] && [ "$HAS_OAUTH_TOKEN" != "true" ]; then
+          echo "::warning::Check Agent Docs: No auth configured. Provide anthropic-api-key or claude-code-oauth-token. Run '/install-github-app' in Claude Code to set up."
           echo "skipped=true" >> "$GITHUB_OUTPUT"
         else
           echo "skipped=false" >> "$GITHUB_OUTPUT"
+          if [ "$HAS_OAUTH_TOKEN" = "true" ]; then
+            echo "auth=oauth" >> "$GITHUB_OUTPUT"
+          else
+            echo "auth=api-key" >> "$GITHUB_OUTPUT"
+          fi
         fi
 
     - name: Find doc files
@@ -108,6 +119,7 @@ runs:
 
           Be specific about what's wrong and what the fix should be.
         claude_args: "--model ${{ inputs.model }}"
+        claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
         github_token: ${{ inputs.github-token }}
       env:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
