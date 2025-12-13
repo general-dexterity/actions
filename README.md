@@ -49,6 +49,23 @@ Check for dead links in built site using hyperlink.
     directory: dist
 ```
 
+### `claude-tag`
+Add a "Claude" label (orange) to PRs when the branch starts with `claude/`.
+
+```yaml
+# .github/workflows/claude-tag.yml
+name: Claude Tag
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: general-dexterity/actions/claude-tag@v1
+```
+
 ### `delete-deployment-environment`
 Delete a GitHub deployment environment.
 
