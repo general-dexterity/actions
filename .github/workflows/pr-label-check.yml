@@ -1,0 +1,15 @@
+name: PR Label Check
+
+on:
+  pull_request:
+    types: [opened, labeled, unlabeled, synchronize]
+
+jobs:
+  check-labels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for blocking labels
+        uses: general-dexterity/actions/pr-label-check@main
+        with:
+          blocking-labels: "blocked"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
