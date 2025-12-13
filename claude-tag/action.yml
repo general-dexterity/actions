@@ -1,0 +1,54 @@
+name: "Claude Tag"
+description: "Adds a Claude label to PRs from claude/ branches"
+
+inputs:
+  github-token:
+    description: "GitHub token for API access"
+    required: false
+    default: ${{ github.token }}
+  label-name:
+    description: "Name of the label to add"
+    required: false
+    default: "Claude"
+  label-color:
+    description: "Color of the label (hex without #)"
+    required: false
+    default: "F97316"
+
+outputs:
+  labeled:
+    description: "Whether the label was added (true/false)"
+    value: ${{ steps.add-label.outputs.labeled }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check branch and add label
+      id: add-label
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        LABEL_NAME: ${{ inputs.label-name }}
+        LABEL_COLOR: ${{ inputs.label-color }}
+        BRANCH_NAME: ${{ github.head_ref }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+      run: |
+        echo "Checking branch: $BRANCH_NAME"
+
+        if [[ ! "$BRANCH_NAME" =~ ^claude/ ]]; then
+          echo "Branch does not start with 'claude/', skipping"
+          echo "labeled=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "Branch starts with 'claude/', adding label..."
+
+        # Create label if it doesn't exist (ignore error if it already exists)
+        gh label create "$LABEL_NAME" --color "$LABEL_COLOR" --repo "$REPO" 2>/dev/null || true
+
+        # Add label to PR
+        gh pr edit "$PR_NUMBER" --add-label "$LABEL_NAME" --repo "$REPO"
+
+        echo "labeled=true" >> "$GITHUB_OUTPUT"
+        echo "Added '$LABEL_NAME' label to PR #$PR_NUMBER"
