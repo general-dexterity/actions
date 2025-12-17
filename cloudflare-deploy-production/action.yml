@@ -31,7 +31,7 @@ outputs:
     value: ${{ steps.deployment.outputs.deployment_id }}
   version-id:
     description: "Cloudflare version ID"
-    value: ${{ steps.upload.outputs.version-id }}
+    value: ${{ steps.extract-version.outputs.version-id }}
 
 runs:
   using: "composite"
@@ -53,13 +53,20 @@ runs:
         workingDirectory: ${{ inputs.working-directory }}
         command: versions upload ${{ inputs.version-message && format('--message "{0}"', inputs.version-message) || '' }}
 
+    - name: Extract version ID
+      id: extract-version
+      shell: bash
+      run: |
+        VERSION_ID=$(echo "${{ steps.upload.outputs.command-output }}" | grep -oP 'Worker Version ID: \K[a-f0-9-]+')
+        echo "version-id=$VERSION_ID" >> $GITHUB_OUTPUT
+
     - name: Deploy version to production
       uses: cloudflare/wrangler-action@v3
       with:
         apiToken: ${{ inputs.cloudflare-api-token }}
         accountId: ${{ inputs.cloudflare-account-id }}
         workingDirectory: ${{ inputs.working-directory }}
-        command: versions deploy ${{ steps.upload.outputs.version-id }}@100%
+        command: versions deploy ${{ steps.extract-version.outputs.version-id }}@100%
 
     - name: Update Deployment Status
       if: always()
