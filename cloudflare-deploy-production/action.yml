@@ -66,7 +66,7 @@ runs:
         apiToken: ${{ inputs.cloudflare-api-token }}
         accountId: ${{ inputs.cloudflare-account-id }}
         workingDirectory: ${{ inputs.working-directory }}
-        command: versions deploy ${{ steps.extract-version.outputs.version-id }}@100%
+        command: versions deploy ${{ steps.extract-version.outputs.version-id }}@100% -y
 
     - name: Update Deployment Status
       if: always()
