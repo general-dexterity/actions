@@ -2,6 +2,18 @@ name: Claude Tag
 on:
   pull_request:
     types: [opened, reopened]
+  workflow_call:
+    inputs:
+      label-name:
+        description: "Name of the label to add"
+        required: false
+        type: string
+        default: "Claude"
+      label-color:
+        description: "Color of the label (hex without #)"
+        required: false
+        type: string
+        default: "F97316"
 
 jobs:
   label:
@@ -11,3 +23,6 @@ jobs:
       contents: read
     steps:
       - uses: general-dexterity/actions/claude-tag@v1
+        with:
+          label-name: ${{ inputs.label-name || 'Claude' }}
+          label-color: ${{ inputs.label-color || 'F97316' }}
