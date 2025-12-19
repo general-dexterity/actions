@@ -3,13 +3,20 @@ name: PR Label Check
 on:
   pull_request:
     types: [opened, labeled, unlabeled, synchronize]
+  workflow_call:
+    inputs:
+      blocking-labels:
+        description: "Comma-separated list of labels that block merging"
+        required: false
+        type: string
+        default: "blocked"
 
 jobs:
   check-labels:
     runs-on: ubuntu-latest
     steps:
       - name: Check for blocking labels
-        uses: general-dexterity/actions/pr-label-check@main
+        uses: general-dexterity/actions/pr-label-check@v1
         with:
-          blocking-labels: "blocked"
+          blocking-labels: ${{ inputs.blocking-labels || 'blocked' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
