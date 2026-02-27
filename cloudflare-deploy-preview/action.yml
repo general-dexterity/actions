@@ -48,8 +48,19 @@ runs:
       id: extract-url
       shell: bash
       run: |
-        ALIAS_URL=$(echo "${{ steps.wrangler.outputs.command-output }}" | grep -oE 'https://[^ ]+\.workers\.dev' | grep "${{ inputs.preview-alias }}" | head -1)
+        WRANGLER_OUTPUT='${{ steps.wrangler.outputs.command-output }}'
+
+        ALIAS_URL=$(printf '%s\n' "$WRANGLER_OUTPUT" | grep -oE 'https://[^ ]+\.workers\.dev' | grep "${{ inputs.preview-alias }}" | head -1 || true)
+
+        if [ -z "$ALIAS_URL" ]; then
+          ALIAS_URL=$(printf '%s\n' "$WRANGLER_OUTPUT" | grep -oE 'https://[^ ]+\.workers\.dev' | head -1 || true)
+        fi
+
         echo "alias-url=$ALIAS_URL" >> $GITHUB_OUTPUT
+
+        if [ -z "$ALIAS_URL" ]; then
+          echo "No workers.dev URL found in Wrangler output; continuing without deployment environment URL."
+        fi
 
     - name: Create GitHub Deployment
       uses: chrnorm/deployment-action@v2
