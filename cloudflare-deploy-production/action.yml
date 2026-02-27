@@ -44,6 +44,15 @@ runs:
         environment: ${{ inputs.environment-name }}
         environment-url: ${{ inputs.environment-url }}
 
+    - name: Normalize version message
+      id: normalize-version-message
+      shell: bash
+      env:
+        RAW_VERSION_MESSAGE: ${{ inputs.version-message }}
+      run: |
+        SAFE_VERSION_MESSAGE=$(printf '%s' "$RAW_VERSION_MESSAGE" | tr '\n\r' ' ' | sed 's/[[:space:]]\+/ /g' | sed 's/"/\\"/g' | sed 's/^ //; s/ $//')
+        echo "safe-version-message=$SAFE_VERSION_MESSAGE" >> $GITHUB_OUTPUT
+
     - name: Upload version
       uses: cloudflare/wrangler-action@v3
       id: upload
@@ -51,7 +60,7 @@ runs:
         apiToken: ${{ inputs.cloudflare-api-token }}
         accountId: ${{ inputs.cloudflare-account-id }}
         workingDirectory: ${{ inputs.working-directory }}
-        command: versions upload ${{ inputs.version-message && format('--message "{0}"', inputs.version-message) || '' }}
+        command: versions upload ${{ steps.normalize-version-message.outputs.safe-version-message && format('--message "{0}"', steps.normalize-version-message.outputs.safe-version-message) || '' }}
 
     - name: Extract version ID
       id: extract-version
