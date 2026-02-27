@@ -47,9 +47,9 @@ runs:
     - name: Extract alias URL
       id: extract-url
       shell: bash
+      env:
+        WRANGLER_OUTPUT: ${{ steps.wrangler.outputs.command-output }}
       run: |
-        WRANGLER_OUTPUT='${{ steps.wrangler.outputs.command-output }}'
-
         ALIAS_URL=$(printf '%s\n' "$WRANGLER_OUTPUT" | grep -oE 'https://[^ ]+\.workers\.dev' | grep "${{ inputs.preview-alias }}" | head -1 || true)
 
         if [ -z "$ALIAS_URL" ]; then
