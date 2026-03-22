@@ -1,5 +1,5 @@
 name: "Deploy to Cloudflare (Preview)"
-description: "Deploy preview version to Cloudflare Workers with alias and create GitHub deployment"
+description: "Deploy preview version to Cloudflare Workers with alias, create GitHub deployment, and comment on PR"
 
 inputs:
   cloudflare-api-token:
@@ -23,11 +23,14 @@ inputs:
   working-directory:
     description: "Directory containing wrangler.toml/wrangler.jsonc"
     required: false
+  pr-number:
+    description: "PR number for commenting. If not provided, tries github.event.pull_request.number."
+    required: false
 
 outputs:
   deployment-id:
     description: "GitHub deployment ID"
-    value: ${{ steps.deployment.outputs.deployment_id }}
+    value: ${{ steps.deployment.outputs.deployment-id }}
   deployment-url:
     description: "Preview deployment URL (alias URL)"
     value: ${{ steps.extract-url.outputs.alias-url }}
@@ -36,13 +39,41 @@ runs:
   using: "composite"
   steps:
     - name: Deploy to Cloudflare Workers (Preview)
-      uses: cloudflare/wrangler-action@v3
       id: wrangler
-      with:
-        apiToken: ${{ inputs.cloudflare-api-token }}
-        accountId: ${{ inputs.cloudflare-account-id }}
-        workingDirectory: ${{ inputs.working-directory }}
-        command: versions upload --preview-alias ${{ inputs.preview-alias }} ${{ inputs.version-message && format('--message "{0}"', inputs.version-message) || '' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory || '.' }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+      run: |
+        STDOUT_FILE=$(mktemp)
+        STDERR_FILE=$(mktemp)
+
+        set +e
+        pnpm wrangler versions upload --preview-alias ${{ inputs.preview-alias }} ${{ inputs.version-message && format('--message "{0}"', inputs.version-message) || '' }} > "$STDOUT_FILE" 2> "$STDERR_FILE"
+        EXIT_CODE=$?
+        set -e
+
+        STDOUT=$(cat "$STDOUT_FILE")
+        STDERR=$(cat "$STDERR_FILE")
+
+        if [ -n "$STDOUT" ]; then echo "$STDOUT"; fi
+        if [ -n "$STDERR" ]; then echo "$STDERR" >&2; fi
+
+        {
+          echo "command-output<<WRANGLER_EOF"
+          echo "$STDOUT"
+          echo "WRANGLER_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "command-stderr<<WRANGLER_EOF"
+          echo "$STDERR"
+          echo "WRANGLER_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        rm -f "$STDOUT_FILE" "$STDERR_FILE"
+        exit $EXIT_CODE
 
     - name: Extract alias URL
       id: extract-url
@@ -63,18 +94,114 @@ runs:
         fi
 
     - name: Create GitHub Deployment
-      uses: chrnorm/deployment-action@v2
       id: deployment
+      uses: actions/github-script@v8
       with:
-        token: ${{ inputs.github-token }}
-        environment: ${{ inputs.environment-name || inputs.preview-alias }}
-        environment-url: ${{ steps.extract-url.outputs.alias-url }}
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const deployment = await github.rest.repos.createDeployment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: context.sha,
+            environment: '${{ inputs.environment-name || inputs.preview-alias }}',
+            auto_merge: false,
+            required_contexts: [],
+            transient_environment: true,
+          });
+          const deploymentId = deployment.data.id;
+          core.setOutput('deployment-id', deploymentId);
 
-    - name: Update Deployment Status
-      if: always()
-      uses: chrnorm/deployment-status@v2
+          await github.rest.repos.createDeploymentStatus({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            deployment_id: deploymentId,
+            state: 'success',
+            environment_url: '${{ steps.extract-url.outputs.alias-url }}',
+          });
+
+    - name: Comment preview URL on PR
+      if: always() && (inputs.pr-number != '' || github.event.pull_request.number)
+      uses: actions/github-script@v8
       with:
-        token: ${{ inputs.github-token }}
-        deployment-id: ${{ steps.deployment.outputs.deployment_id }}
-        environment-url: ${{ steps.extract-url.outputs.alias-url }}
-        state: ${{ job.status == 'success' && 'success' || 'failure' }}
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const prNumber = ${{ inputs.pr-number || 'null' }} || context.payload.pull_request?.number;
+          if (!prNumber) {
+            core.info('No PR number available, skipping comment.');
+            return;
+          }
+
+          const envName = '${{ inputs.environment-name || inputs.preview-alias }}';
+          const deployFailed = '${{ steps.wrangler.outcome }}' === 'failure';
+
+          if (deployFailed) {
+            const errorMarker = `<!-- cf-preview-error:${envName} -->`;
+            const stderr = `${{ steps.wrangler.outputs.command-stderr }}`.trim();
+            const body = [
+              errorMarker,
+              `**Preview deployment failed** for \`${envName}\` at ${context.sha.substring(0, 7)}.`,
+              '',
+              stderr ? '```\n' + stderr + '\n```' : '_No error output captured._',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body,
+            });
+            return;
+          }
+
+          const aliasUrl = '${{ steps.extract-url.outputs.alias-url }}';
+          const shortSha = context.sha.substring(0, 7);
+          const marker = `<!-- cf-preview:${envName} -->`;
+          const body = [
+            marker,
+            `**Preview deployed** for \`${envName}\``,
+            '',
+            `| URL | Commit |`,
+            `| --- | ------ |`,
+            `| ${aliasUrl} | \`${shortSha}\` |`,
+          ].join('\n');
+
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: prNumber,
+            per_page: 100,
+          });
+
+          const existing = comments.find(c => c.body.includes(marker));
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body,
+            });
+          }
+
+    - name: Update Deployment Status on Failure
+      if: failure()
+      uses: actions/github-script@v8
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const deploymentId = '${{ steps.deployment.outputs.deployment-id }}';
+          if (!deploymentId) return;
+
+          await github.rest.repos.createDeploymentStatus({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            deployment_id: parseInt(deploymentId),
+            state: 'failure',
+            environment_url: '${{ steps.extract-url.outputs.alias-url }}',
+          });

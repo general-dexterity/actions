@@ -1,0 +1,92 @@
+name: "Run Wrangler Command"
+description: "Run a wrangler command with optional pre/post commands. Requires wrangler to be installed (e.g. via pnpm)."
+
+inputs:
+  command:
+    description: "Wrangler command to run (e.g. versions upload --preview-alias pr-123)"
+    required: true
+  pre-commands:
+    description: "Newline-separated commands to run before the main command (e.g. D1 migrations)"
+    required: false
+  post-commands:
+    description: "Newline-separated commands to run after the main command"
+    required: false
+  api-token:
+    description: "Cloudflare API token"
+    required: true
+  account-id:
+    description: "Cloudflare account ID"
+    required: true
+  working-directory:
+    description: "Directory containing wrangler config"
+    required: false
+
+outputs:
+  command-output:
+    description: "stdout from the main wrangler command"
+    value: ${{ steps.run.outputs.stdout }}
+  command-stderr:
+    description: "stderr from the main wrangler command"
+    value: ${{ steps.run.outputs.stderr }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run pre-commands
+      if: inputs.pre-commands != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory || '.' }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
+      run: |
+        ${{ inputs.pre-commands }}
+
+    - name: Run wrangler command
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory || '.' }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
+      run: |
+        STDOUT_FILE=$(mktemp)
+        STDERR_FILE=$(mktemp)
+
+        set +e
+        pnpm wrangler ${{ inputs.command }} > "$STDOUT_FILE" 2> "$STDERR_FILE"
+        EXIT_CODE=$?
+        set -e
+
+        STDOUT=$(cat "$STDOUT_FILE")
+        STDERR=$(cat "$STDERR_FILE")
+
+        # Print output for logs
+        if [ -n "$STDOUT" ]; then echo "$STDOUT"; fi
+        if [ -n "$STDERR" ]; then echo "$STDERR" >&2; fi
+
+        # Set outputs (use delimiter for multiline)
+        {
+          echo "stdout<<WRANGLER_EOF"
+          echo "$STDOUT"
+          echo "WRANGLER_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "stderr<<WRANGLER_EOF"
+          echo "$STDERR"
+          echo "WRANGLER_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        rm -f "$STDOUT_FILE" "$STDERR_FILE"
+        exit $EXIT_CODE
+
+    - name: Run post-commands
+      if: inputs.post-commands != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory || '.' }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
+      run: |
+        ${{ inputs.post-commands }}

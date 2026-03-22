@@ -4,13 +4,13 @@ Reusable GitHub Actions for General Dexterity projects.
 
 ## Versioning
 
-Use the `@v1` tag for the latest stable v1.x.x release:
+Use the `@v2` tag for the latest stable release:
 
 ```yaml
-uses: general-dexterity/actions/pnpm-install@v1
+uses: general-dexterity/actions/pnpm-install@v2
 ```
 
-For maximum stability, pin to a specific version (e.g., `@v1.0.0`).
+For maximum stability, pin to a specific version (e.g., `@v2.0.0`).
 
 ## Actions
 
@@ -18,7 +18,7 @@ For maximum stability, pin to a specific version (e.g., `@v1.0.0`).
 Deploy to Cloudflare Workers production traffic using versions.
 
 ```yaml
-- uses: general-dexterity/actions/cloudflare-deploy-production@v1
+- uses: general-dexterity/actions/cloudflare-deploy-production@v2
   with:
     cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -28,23 +28,37 @@ Deploy to Cloudflare Workers production traffic using versions.
 ```
 
 ### `cloudflare-deploy-preview`
-Deploy preview version with alias to Cloudflare Workers.
+Deploy preview version with alias to Cloudflare Workers. Automatically comments the preview URL on the PR.
 
 ```yaml
-- uses: general-dexterity/actions/cloudflare-deploy-preview@v1
+- uses: general-dexterity/actions/cloudflare-deploy-preview@v2
   with:
     cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     preview-alias: pr-123
     version-message: "abc1234 commit message"
     github-token: ${{ github.token }}
+    pr-number: ${{ github.event.pull_request.number }}
+```
+
+The `pr-number` input is optional. If omitted, the action tries to resolve it from the pull request event context. Pass it explicitly when running in `workflow_run` triggers where the PR context isn't directly available (e.g., `${{ github.event.workflow_run.pull_requests[0].number }}`).
+
+### `wrangler-run`
+Run a wrangler command with optional pre/post commands. Use this instead of `cloudflare/wrangler-action` for tasks like D1 migrations.
+
+```yaml
+- uses: general-dexterity/actions/wrangler-run@v2
+  with:
+    command: "d1 migrations apply MY_DB --remote"
+    api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 ```
 
 ### `check-dead-links`
 Check for dead links in built site using hyperlink.
 
 ```yaml
-- uses: general-dexterity/actions/check-dead-links@v1
+- uses: general-dexterity/actions/check-dead-links@v2
   with:
     directory: dist
 ```
@@ -66,24 +80,14 @@ jobs:
       pull-requests: write
       contents: read
     steps:
-      - uses: general-dexterity/actions/claude-tag@v1
-```
-
-### `delete-deployment-environment`
-Delete a GitHub deployment environment.
-
-```yaml
-- uses: general-dexterity/actions/delete-deployment-environment@v1
-  with:
-    github-token: ${{ github.token }}
-    environment-name: pr-123
+      - uses: general-dexterity/actions/claude-tag@v2
 ```
 
 ### `pnpm-install`
 Install pnpm and dependencies with caching.
 
 ```yaml
-- uses: general-dexterity/actions/pnpm-install@v1
+- uses: general-dexterity/actions/pnpm-install@v2
 ```
 
 ### `pr-label-check`
@@ -102,7 +106,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: general-dexterity/actions/pr-label-check@v1
+      - uses: general-dexterity/actions/pr-label-check@v2
         # with:
         #   blocking-labels: blocked,do-not-merge  # optional, defaults to "blocked"
 ```

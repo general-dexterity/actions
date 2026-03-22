@@ -28,7 +28,7 @@ inputs:
 outputs:
   deployment-id:
     description: "GitHub deployment ID"
-    value: ${{ steps.deployment.outputs.deployment_id }}
+    value: ${{ steps.deployment.outputs.deployment-id }}
   version-id:
     description: "Cloudflare version ID"
     value: ${{ steps.extract-version.outputs.version-id }}
@@ -37,12 +37,20 @@ runs:
   using: "composite"
   steps:
     - name: Create GitHub Deployment
-      uses: chrnorm/deployment-action@v2
       id: deployment
+      uses: actions/github-script@v8
       with:
-        token: ${{ inputs.github-token }}
-        environment: ${{ inputs.environment-name }}
-        environment-url: ${{ inputs.environment-url }}
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const deployment = await github.rest.repos.createDeployment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: context.sha,
+            environment: '${{ inputs.environment-name }}',
+            auto_merge: false,
+            required_contexts: [],
+          });
+          core.setOutput('deployment-id', deployment.data.id);
 
     - name: Normalize version message
       id: normalize-version-message
@@ -54,34 +62,68 @@ runs:
         echo "safe-version-message=$SAFE_VERSION_MESSAGE" >> $GITHUB_OUTPUT
 
     - name: Upload version
-      uses: cloudflare/wrangler-action@v3
       id: upload
-      with:
-        apiToken: ${{ inputs.cloudflare-api-token }}
-        accountId: ${{ inputs.cloudflare-account-id }}
-        workingDirectory: ${{ inputs.working-directory }}
-        command: versions upload ${{ steps.normalize-version-message.outputs.safe-version-message && format('--message "{0}"', steps.normalize-version-message.outputs.safe-version-message) || '' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory || '.' }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+      run: |
+        STDOUT_FILE=$(mktemp)
+        STDERR_FILE=$(mktemp)
+
+        set +e
+        pnpm wrangler versions upload ${{ steps.normalize-version-message.outputs.safe-version-message && format('--message "{0}"', steps.normalize-version-message.outputs.safe-version-message) || '' }} > "$STDOUT_FILE" 2> "$STDERR_FILE"
+        EXIT_CODE=$?
+        set -e
+
+        STDOUT=$(cat "$STDOUT_FILE")
+        STDERR=$(cat "$STDERR_FILE")
+
+        if [ -n "$STDOUT" ]; then echo "$STDOUT"; fi
+        if [ -n "$STDERR" ]; then echo "$STDERR" >&2; fi
+
+        {
+          echo "command-output<<WRANGLER_EOF"
+          echo "$STDOUT"
+          echo "WRANGLER_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        rm -f "$STDOUT_FILE" "$STDERR_FILE"
+        exit $EXIT_CODE
 
     - name: Extract version ID
       id: extract-version
       shell: bash
+      env:
+        UPLOAD_OUTPUT: ${{ steps.upload.outputs.command-output }}
       run: |
-        VERSION_ID=$(echo "${{ steps.upload.outputs.command-output }}" | grep -oP 'Worker Version ID: \K[a-f0-9-]+')
+        VERSION_ID=$(echo "$UPLOAD_OUTPUT" | grep -oP 'Worker Version ID: \K[a-f0-9-]+')
         echo "version-id=$VERSION_ID" >> $GITHUB_OUTPUT
 
     - name: Deploy version to production
-      uses: cloudflare/wrangler-action@v3
-      with:
-        apiToken: ${{ inputs.cloudflare-api-token }}
-        accountId: ${{ inputs.cloudflare-account-id }}
-        workingDirectory: ${{ inputs.working-directory }}
-        command: versions deploy ${{ steps.extract-version.outputs.version-id }}@100% -y
+      shell: bash
+      working-directory: ${{ inputs.working-directory || '.' }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+      run: |
+        pnpm wrangler versions deploy ${{ steps.extract-version.outputs.version-id }}@100% -y
 
     - name: Update Deployment Status
       if: always()
-      uses: chrnorm/deployment-status@v2
+      uses: actions/github-script@v8
       with:
-        token: ${{ inputs.github-token }}
-        deployment-id: ${{ steps.deployment.outputs.deployment_id }}
-        environment-url: ${{ inputs.environment-url }}
-        state: ${{ job.status == 'success' && 'success' || 'failure' }}
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const deploymentId = '${{ steps.deployment.outputs.deployment-id }}';
+          if (!deploymentId) return;
+
+          const state = '${{ job.status }}' === 'success' ? 'success' : 'failure';
+          await github.rest.repos.createDeploymentStatus({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            deployment_id: parseInt(deploymentId),
+            state,
+            environment_url: '${{ inputs.environment-url }}',
+          });

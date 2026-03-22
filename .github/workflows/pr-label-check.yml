@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check for blocking labels
-        uses: general-dexterity/actions/pr-label-check@v1
+        uses: general-dexterity/actions/pr-label-check@v2
         with:
           blocking-labels: ${{ inputs.blocking-labels || 'blocked' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
