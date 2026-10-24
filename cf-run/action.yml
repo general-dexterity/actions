@@ -1,0 +1,93 @@
+name: "Run cf Command"
+description: "Run a cf CLI command with optional pre/post commands. Requires the cf package installed in the project (cf reads cloudflare.config.ts)."
+
+inputs:
+  command:
+    description: "cf command to run (e.g. d1 migrations apply <database-id> --dir ./migrations)"
+    required: true
+  pre-commands:
+    description: "Newline-separated commands to run before the main command"
+    required: false
+  post-commands:
+    description: "Newline-separated commands to run after the main command"
+    required: false
+  api-token:
+    description: "Cloudflare API token"
+    required: true
+  account-id:
+    description: "Cloudflare account ID"
+    required: true
+  mode:
+    description: "cf mode used to evaluate cloudflare.config.ts (optional)"
+    required: false
+  working-directory:
+    description: "Directory containing cloudflare.config.ts"
+    required: false
+
+outputs:
+  command-output:
+    description: "stdout from the main cf command"
+    value: ${{ steps.run.outputs.stdout }}
+  command-stderr:
+    description: "stderr from the main cf command"
+    value: ${{ steps.run.outputs.stderr }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run pre-commands
+      if: inputs.pre-commands != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory || '.' }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
+      run: |
+        ${{ inputs.pre-commands }}
+
+    - name: Run cf command
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory || '.' }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
+        CF_MODE: ${{ inputs.mode }}
+      run: |
+        STDOUT_FILE=$(mktemp)
+        STDERR_FILE=$(mktemp)
+
+        MODE_FLAG=""
+        if [ -n "$CF_MODE" ]; then MODE_FLAG="--mode $CF_MODE"; fi
+
+        set +e
+        eval pnpm exec cf $MODE_FLAG ${{ inputs.command }} > "$STDOUT_FILE" 2> "$STDERR_FILE"
+        EXIT_CODE=$?
+        set -e
+
+        {
+          echo "stdout<<CF_EOF"
+          cat "$STDOUT_FILE"
+          echo "CF_EOF"
+        } >> "$GITHUB_OUTPUT"
+        {
+          echo "stderr<<CF_EOF"
+          cat "$STDERR_FILE"
+          echo "CF_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        cat "$STDOUT_FILE"
+        cat "$STDERR_FILE" >&2
+
+        rm -f "$STDOUT_FILE" "$STDERR_FILE"
+        exit $EXIT_CODE
+
+    - name: Run post-commands
+      if: inputs.post-commands != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory || '.' }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
+      run: |
+        ${{ inputs.post-commands }}
