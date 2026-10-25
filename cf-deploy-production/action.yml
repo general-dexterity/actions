@@ -108,7 +108,12 @@ runs:
       env:
         UPLOAD_OUTPUT: ${{ steps.upload.outputs.command-output }}
       run: |
-        VERSION_ID=$(printf '%s' "$UPLOAD_OUTPUT" | grep -oE '"(version_id|id)"[[:space:]]*:[[:space:]]*"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"' | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}')
+        # cf project commands print human output ("Worker Version ID: <uuid>");
+        # fall back to the JSON key in case the format is JSON.
+        VERSION_ID=$(printf '%s' "$UPLOAD_OUTPUT" | grep -oE 'Worker Version ID: [a-f0-9-]{36}' | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}')
+        if [ -z "$VERSION_ID" ]; then
+          VERSION_ID=$(printf '%s' "$UPLOAD_OUTPUT" | grep -oE '"(version_id|id)"[[:space:]]*:[[:space:]]*"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"' | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}')
+        fi
         if [ -z "$VERSION_ID" ]; then
           echo "Could not extract a version ID from cf output:" >&2
           printf '%s\n' "$UPLOAD_OUTPUT" >&2
