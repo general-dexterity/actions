@@ -99,6 +99,12 @@ runs:
           echo "CF_EOF"
         } >> "$GITHUB_OUTPUT"
 
+        {
+          echo "command-stderr<<CF_EOF"
+          echo "$STDERR"
+          echo "CF_EOF"
+        } >> "$GITHUB_OUTPUT"
+
         rm -f "$STDOUT_FILE" "$STDERR_FILE"
         exit $EXIT_CODE
 
@@ -107,16 +113,17 @@ runs:
       shell: bash
       env:
         UPLOAD_OUTPUT: ${{ steps.upload.outputs.command-output }}
+        UPLOAD_STDERR: ${{ steps.upload.outputs.command-stderr }}
       run: |
-        # cf project commands print human output ("Worker Version ID: <uuid>");
-        # fall back to the JSON key in case the format is JSON.
-        VERSION_ID=$(printf '%s' "$UPLOAD_OUTPUT" | grep -oE 'Worker Version ID: [a-f0-9-]{36}' | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}')
+        # cf project commands print 'Worker Version ID: <uuid>' on stderr, not
+        # JSON. Fall back to the JSON key in case the format is JSON.
+        VERSION_ID=$(printf '%s\n%s' "$UPLOAD_OUTPUT" "$UPLOAD_STDERR" | grep -oE 'Worker Version ID: [a-f0-9-]{36}' | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}')
         if [ -z "$VERSION_ID" ]; then
-          VERSION_ID=$(printf '%s' "$UPLOAD_OUTPUT" | grep -oE '"(version_id|id)"[[:space:]]*:[[:space:]]*"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"' | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}')
+          VERSION_ID=$(printf '%s\n%s' "$UPLOAD_OUTPUT" "$UPLOAD_STDERR" | grep -oE '"(version_id|id)"[[:space:]]*:[[:space:]]*"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"' | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}')
         fi
         if [ -z "$VERSION_ID" ]; then
           echo "Could not extract a version ID from cf output:" >&2
-          printf '%s\n' "$UPLOAD_OUTPUT" >&2
+          printf '%s\n%s\n' "$UPLOAD_OUTPUT" "$UPLOAD_STDERR" >&2
           exit 1
         fi
         echo "version-id=$VERSION_ID" >> $GITHUB_OUTPUT
