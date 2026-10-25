@@ -24,6 +24,9 @@ inputs:
   github-token:
     description: "GitHub token for deployment status"
     required: true
+  worker-name:
+    description: "Worker name for cf workers deployments create"
+    required: true
   working-directory:
     description: "Directory containing cloudflare.config.ts"
     required: false
@@ -136,10 +139,11 @@ runs:
         CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
         CF_VERSION_ID: ${{ steps.extract-version.outputs.version-id }}
         CF_MODE: ${{ inputs.mode }}
+        CF_WORKER_NAME: ${{ inputs.worker-name }}
       run: |
         MODE_FLAG=""
         if [ -n "$CF_MODE" ]; then MODE_FLAG="--mode $CF_MODE"; fi
-        pnpm exec cf workers deployments create $MODE_FLAG --strategy percentage --versions "[{\"version_id\":\"$CF_VERSION_ID\",\"percentage\":100}]"
+        pnpm exec cf workers deployments create --worker "$CF_WORKER_NAME" $MODE_FLAG --strategy percentage --versions "[{\"version_id\":\"$CF_VERSION_ID\",\"percentage\":100}]"
 
     - name: Update Deployment Status
       if: always()
